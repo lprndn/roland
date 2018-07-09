@@ -1,0 +1,32 @@
+(ns roland.core
+  (:import [org.apache.pdfbox.pdmodel PDDocument])
+  (:require [roland.utils :refer [hengrave vengrave]]
+            [roland.pdfobj :refer [page content]]
+            [roland.colors :refer [ink]]
+            [roland.papersizes]
+            [roland.measurements]
+            [roland.shapes :refer [fill-color stroke-color rectangle circle line polygon]]
+            [roland.text :refer [write]]
+            #_[roland.layout [layout frame]]
+            :reload-all))
+
+(defn rld
+  "Takes a vector describing a pdf. Outputs a modified vector describing the final pdf. Produces the said pdf file as a side effect."
+  [& elements]
+  (if (map? (first elements))
+    (vengrave (first elements) (drop 1 elements))
+    (vengrave {} elements)))
+
+(defn pdf
+  "A PDDocument."
+  [{:keys [title location]
+    :or {title "veillantif", location "./"} :as options}
+   & elements]
+  (let [pdoc (PDDocument.)
+        opts (conj options {:pdoc pdoc})]
+    (do
+      (hengrave opts elements)
+      (doto pdoc
+        (.save (str "/home/lprndn/" title ".pdf"))
+        .close)
+      opts)))
