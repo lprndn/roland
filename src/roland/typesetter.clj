@@ -166,31 +166,27 @@
                  ^java.lang.Integer lenght])
 
 (defrecord LineP [^clojure.lang.PersistentVector boxes 
-                  ^java.lang.Integer lenght])
+                  ^java.lang.Integer nlw
+                  ^clojure.lang.Numbers acceptability])
 
 (defrecord ParagraphP [^clojure.lang.PersistentVector lines
                        ^roland.typesetter.LineP current-line
                        ^clojure.lang.Numbers current-nlw
-                       ^clojure.lang.Numbers current-acceptability])
+                       ^clojure.lang.Numbers acceptability])
 
-;;;_  * Test
-
-(defn prob-linebreak [text text-width o+ o-]
-  (letfn []
-    (reduce #() text)))
-
-(defn prob-linebreak-step [par box tw o+ o-]
-  (if (>= (acceptability box par tw o+ o-) (par :current-acceptability))
-    ()
-    ()))
+;;;_   * Test
 
 (defn normal [x o]
   (/ (Math/exp (/ (Math/pow x 2) (Math/pow o 2)))
      (* 2 Math/PI o)))
 
+
+(defn boxify [text]
+  (map #(->BoxP % (count %)) (split text #"\s+")))
+
 ;;;_   * Natural line width
 
-(defn nlwi [cwi nlwi-1 in]
+#_(defn nlwi [cwi nlwi-1 in]
   (if nlwi-1 
     (if (nlwi-1 :breakup)
       cwi
@@ -199,22 +195,55 @@
 
 ;;;_   * Acceptability probability
 
-(defn br-acceptability-prob
+(defn br-acceptability-distribution
   ([cwi x o+ o-] (if (>= (+ cwi x) 0)
-                   (/ (normal (+ cwi x) o+)
-                      (br-acceptability-prob x o+ o-))
-                   (/ (normal (= cwi x) o-)
-                      (br-acceptability-prob x o+ o-))))
+                   (do (println "+")(/ (normal (+ cwi x) o+)
+                       (br-acceptability-distribution x o+ o-)))
+                   (do (println "-") (/ (normal (+ cwi x) o-)
+                          (br-acceptability-distribution x o+ o-)))))
   ([x o+ o-] (if (>= x 0)
-               (normal x o+)
-               (normal x o-))))
+               (do (println "2+") (normal x o+))
+               (do (println "2-") (normal x o-)))))
 
 (defn breakup-acceptability [box par tw o+ o-]
   ;;only if a breakpoint candidat
-  (let [cwi (box :lenght)
-        nlwi-1 (par :current-nlw)
-        prev-a (par :current-acceptability)]
-    (br-acceptability-prob cwi (- nlwi-1 tw) o+ o-)))
+  (let [nlwi-1 (:nlw (:current-line par))
+        cwi (if (= nlwi-1 0)
+              (:lenght box)
+              (+ 1 (:lenght box)))
+        prev-a (:acceptability par)]
+    (br-acceptability-distribution cwi (- nlwi-1 tw) o+ o-)))
+
+(defn new-line! [par box acc]
+  (let [nline (->LineP [box] (:lenght box) acc)
+        nlines (conj (:lines par) (:current-line par))
+        new-par (assoc par
+                        :lines nlines
+                        :current-line nline)]
+    new-par))
+
+(defn add-box! [par box acc]
+  (let [updated-boxes (conj (:boxes (:current-line par)) box)
+        updated-nlw (+ (if (= (:nlw (:current-line par)) 0) 0 1) (:lenght box) (:nlw (:current-line par)))
+        updated-line (assoc (:current-line par) 
+                             :boxes updated-boxes
+                             :acceptability acc
+                             :nlw updated-nlw)
+        new-par (assoc par :current-line updated-line)]
+    new-par))
+
+(defn prob-linebreak-step [par box tw o+ o-]
+  (let [acc (breakup-acceptability box par tw o+ o-)]
+    (println (:content box) (:nlw (:current-line par))  acc)
+    (if (<= acc (:acceptability (:current-line par)))
+      (add-box! par box acc)
+      (new-line! par box acc))))
+
+(defn prob-linebreak [text text-width o+ o-]
+  (let [line (->LineP [] 0 1)
+        paragraph (->ParagraphP [] line 0 1)
+        breakup-step #(prob-linebreak-step %1 %2 text-width o+ o-)]
+    (reduce breakup-step paragraph (boxify text))))
 
 
 ;;;_  * Functions
@@ -230,3 +259,4 @@
 (defn c3 [o+]
 (* (Math/pow o+ 2) (Math/log (* 2 Math/PI o+))))
 
+ 

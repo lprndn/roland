@@ -7,7 +7,6 @@
           :source-paths   #{"test"}
           :dependencies   '[[org.clojure/clojure "RELEASE"]
                             [adzerk/boot-test "RELEASE" :scope "test"]
-                            [malabarba/lazy-map "RELEASE"]
                             [org.apache.pdfbox/pdfbox "RELEASE"]
                             [org.apache.pdfbox/fontbox "RELEASE"]
                             [org.apache.pdfbox/preflight "RELEASE"]
