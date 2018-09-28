@@ -1,16 +1,18 @@
 (def project 'roland)
 (def version "0.1.0-SNAPSHOT")
-(set-env! :resource-paths #{"resources" "src"}
+(set-env! :resource-paths #{#_"resources" "src"}
           :repositories '[["central" "https://repo1.maven.org/maven2/"]
-                          ["clojars" "http://clojars.org/repo"]
+                          ["clojars" "https://clojars.org/repo"]
                           ["jitpack" "https://jitpack.io"]]
           :source-paths   #{"test"}
           :dependencies   '[[org.clojure/clojure "RELEASE"]
+                            [criterium "0.4.4"]
                             [adzerk/boot-test "RELEASE" :scope "test"]
                             [org.apache.pdfbox/pdfbox "RELEASE"]
                             [org.apache.pdfbox/fontbox "RELEASE"]
                             [org.apache.pdfbox/preflight "RELEASE"]
-                            [com.github.alexbirkett/kiwi-java "1984349661"]])
+                            [com.github.alexbirkett/kiwi-java "1984349661"]
+                            [sooheon/boot-gorilla "0.1.1-SNAPSHOT"]])
 
 (task-options!
  aot {:namespace   #{'roland.core}}
@@ -37,3 +39,4 @@
   (apply (resolve 'app/-main) args))
 
 (require '[adzerk.boot-test :refer [test]])
+(require '[sooheon.boot-gorilla :refer [gorilla]])

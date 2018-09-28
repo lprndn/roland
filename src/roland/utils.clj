@@ -1,6 +1,9 @@
 (ns roland.utils)
 
+
+;; Global atom to keep track of current env.
 (def !context (atom {}))
+
 
 (defn add-to-context! [options]
   (swap! !context #(merge % options)))
@@ -22,7 +25,14 @@
   (let [[meta rest] (split-with #(not (vector? %)) definition)
         [arguments defaults] (split-with #(not (keyword? %)) (first rest))
         body (next rest)]
-    `(defn ~name ~@meta [~(merge {:keys arguments} (apply hash-map defaults) {:as 'params})]
+    `(defn ~name ~@meta [~(merge {:keys (vec arguments)} (apply hash-map defaults) {:as 'params}) ~'elements]
+         ~@body)))
+
+#_(defmacro deftag [name & definition]
+  (let [[meta rest] (split-with #(not (vector? %)) definition)
+        [arguments defaults] (split-with #(not (keyword? %)) (first rest))
+        body (next rest)]
+    `(defn ~name ~@meta [~(merge {:keys (vec arguments)} (apply hash-map defaults) {:as 'params})]
        (fn [& ~'elements]
          ~@body))))
 
@@ -30,9 +40,11 @@
   [options elements]
   (when (not (empty? options)) (add-to-context! options))
   (when (not (empty? elements))
-    (doall (map (fn [el] (apply ((-> el first name symbol resolve)
-                                (apply hash-map (mapcat force-eval-map (second el))))
-                               (nnext el))) elements))
+    (doall (map (fn [el]
+                      ((-> el first name symbol resolve)
+                       (apply hash-map (mapcat force-eval-map (second el)))
+                       (nnext el)))
+                elements))
   #_(doseq [el elements]
       (let  [out (apply ((-> el first name symbol resolve) 
                          (apply hash-map (mapcat force-eval-map (second el)))) 
@@ -44,9 +56,8 @@
   [options & elements]
   (engrave! options elements))
 
-
-(defn c> [path]
-  (delay (path @!context)))
+(defn c> [& path]
+  (delay (reduce #(get %1 %2) @!context path)))
 
 #_(defn old-engrave
     [options elements]

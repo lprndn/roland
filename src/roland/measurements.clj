@@ -12,15 +12,23 @@
             "in" (Measurement. 72 "pt" "absolute")
             })
 
-(defn toMeasurement
-  "Convert a string to a Measurement"
-  [^String string]
+(defprotocol Measures
+  (toMeasurement [measure]   "Convert a value to a Measurement"))
+
+(extend-protocol Measures
+  java.lang.Number
+  (toMeasurement [value]
+    (Measurement. value "pt" "absolute"))
+
+  java.lang.String
+  (toMeasurement
+  [string]
   (let [
         value (->> string (re-find #"\d+\.?\d*") read-string)
         unit (re-find #"[a-z]+$" string)
         context (if (nil? (units unit))
                   "relative" "absolute")]
-    (Measurement. value unit context)))
+    (Measurement. value unit context))))
 
 (defn toPoints
   "Convert a Measurement to pts."

@@ -1,9 +1,9 @@
 (ns roland.text
   (:import [org.apache.pdfbox.pdmodel PDPageContentStream]
            [org.apache.pdfbox.pdmodel.font PDType1Font PDFont])
-  (:require [roland.utils :refer [engrave! deftag]]
+  (:require [roland.utils :refer [engrave! deftag !context]]
             [roland.font :refer [otf ttf]]
-            [roland.typesetter :refer [lb1]]))
+            [roland.typesetter :refer [break-paragraph]]))
 
 #_(defn txt
     "Writes a string to a PDPageContentStream."
@@ -15,7 +15,28 @@
     (.)
     (.showText content-stream text))
 
-(deftag write [pdoc content-stream font size color offsetx offsety
+
+;;TODO Text manipulation should be a functions (closure?) to allow composition.
+(deftag justify [text font size typesetter frame
+                 :or {font (PDType1Font/COURIER)
+                      size 12}]
+  (let [lines (break-paragraph text font size typesetter)
+        content-stream (@!context :content-stream)]
+    (doto content-stream
+      .beginText
+      (.setFont font size)
+      (.newLineAtOffset (float (:left frame)) (float (- (:top frame) size))))
+    (doseq [line lines]
+           (doto content-stream
+             (.setWordSpacing (float (- (/ (- (:width frame) (reduce + (map :length line)))
+                     (- (count line) 1))
+                  (/ (* size (.getWidthFromFont font 32)) 1000))))
+             (.showText (apply str (interleave (map :content line) (cycle " "))))
+             (.newLineAtOffset (float 0) (float (- size)))))
+    (.endText content-stream)))
+
+
+#_(deftag write [pdoc content-stream font size color offsetx offsety
                :or {font (PDType1Font/COURIER)
                     size 12
                     offsetx 100

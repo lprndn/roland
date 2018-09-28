@@ -1,8 +1,9 @@
 ;;;_ Namespace
 (ns roland.layout
   (:import [no.birkett.kiwi Solver Strength Symbolics Variable Constraint Expression])
-  (:require [roland.utils :refer [engrave! deftag]]
-            [roland.measurements :refer [toMeasurement toPoints]])
+  (:require [roland.utils :refer [engrave! deftag !context]]
+            [roland.measurements :refer [toMeasurement toPoints]]
+            [roland.shapes :refer [rectangle]])
   (:refer-clojure :rename {+ core+
                            - core-
                            * core*
@@ -24,24 +25,29 @@
   (constrainable [value layout]))
 
 (extend-protocol Constrained
-  
+
+  ;; 563 in pts.
   Number
   (constrainable [value layout]
     (double value)) 
 
+  ;; "12.4mm"
   String
   (constrainable [value layout]
     (:value (toPoints (toMeasurement value))))
-  
+
+  ;; [:layout :frames :frame-name :left]
   clojure.lang.PersistentVector
   (constrainable [value layout]
     (get-in layout value))
-  
+
+  ;; {:args ["12.4mm"] [:frame :top] :op +}
   clojure.lang.PersistentArrayMap
   (constrainable [value layout]
     (apply (:op value)
            (map #(constrainable % layout) (:args value))))
-  
+
+  ;; Otherwise just output value itslef.
   Object
   (constrainable [value layout]
     value))
@@ -139,7 +145,8 @@
   (doseq [[key value] (select-keys frame [:top :bottom :left :right :width :height])]
     (set-constraint! (get-in layout [(frame :name) key]) value layout solver)))
 
-(deftag layout [name]
+(deftag layout [name
+                :or {name (gensym "layout")}]
   (let [solver (Solver.)
         els (map #(if ((second %) :name) (second %) (assoc (second %) :name (str (gensym "frame_")))) elements)
         layout-map (reduce (fn [acc x] (conj acc x)) {} 
@@ -154,13 +161,22 @@
                           [k (apply ->Frame
                                     (map (fn [[k2 m2]]
                                            (if (instance? no.birkett.kiwi.Variable m2) 
-                                             (.getValue m2) 
+                                             (.getValue m2)
                                              m2)) m))]) layout-map)
             lyt {:layout (into {} frames)}]
-        (engrave! lyt nil)
-        lyt))))
+        (engrave! lyt nil)))))
 
-#_(deftag layout []
+;; TODO Broken. Probably need to modify engrave! mechanism.
+(deftag debug-layout []
+  (let [frames (map second (:layout @!context))]
+    (doseq [frame frames]
+      (rectangle {:content-stream (:content-stream @!context)
+                  :x (:left frame)
+                  :y (:bottom frame)
+                  :width (:width frame)
+                  :height (:height frame)} '()))))
+
+#_(Deftag layout []
 (let [solver (Solver.)
       frames-group (partition 2 (interleave (map second elements) 
                                             (map #(init-frame ((second %) :name) solver) elements))) 

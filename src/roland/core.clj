@@ -1,19 +1,21 @@
-;;;_Namespace
+ ;;_Namespace
 
 (ns roland.core
   (:import [org.apache.pdfbox.pdmodel PDDocument])
   (:require [roland.utils :refer [engrave! deftag context !context add-to-context! c>]]
             [roland.pdfobj :refer [page content]]
             [roland.colors :refer [ink]]
+            [roland.font :refer [ttf]]
             [roland.papersizes]
             [roland.measurements]
-            [roland.shapes :refer [fill-color stroke-color rectangle circle line polygon]]
-            [roland.text :refer [write]]
-            [roland.layout :refer [layout frame]]
+            [roland.shapes :refer [fill-color s-color stroke-color rectangle circle line polygon]]
+            [roland.typesetter :refer [viterbi lb1]]
+            [roland.text :refer [justify]]
+            [roland.layout :refer [layout debug-layout]]
             :reload-all))
 
 ;;;_* Roland Main Function
- 
+
 (defn roland
   "Takes a vector describing a pdf. Outputs a modified vector describing the final pdf. Produces the said pdf file as a side effect."
   [& elements]
@@ -24,16 +26,15 @@
     @!context))
 ;;;_* Closure alternative
 
-(deftag pdf [title location 
-             :or {title (or (@!context :title) "veillantif") 
+(deftag pdf [title location
+             :or {title (or (@!context :title) "veillantif")
                   location "~/"}]
   (let [pdoc (PDDocument.)
         opts {:pdoc pdoc}]
     (engrave! opts elements)
     (doto pdoc
       (.save (str "/home/lprndn/" title ".pdf"))
-      .close)
-    nil))
+      .close)))
 
 ;;;_* File type functions
 
@@ -87,7 +88,7 @@
                      (.next els))
               nac))))))
 
-#_(defmacro roland 
+#_(defmacro roland
     [elements]
     (if (not (empty? elements))
       (let [els (clojure.lang.RT/iter elements)]

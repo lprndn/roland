@@ -8,44 +8,51 @@
 (def kyklos (* 4 (/ (- (Math/sqrt 2) 1) 3)))
 
 
-(defn stroke-color
-  ([{:keys [content-stream color] :as options}]
-   (.setStrokingColor (@!context :content-stream) (ink color))
-   {:s-color color})
+(deftag s-color [color
+                 :or {color [255]}]
+  (when (not (empty? elements))
+    (.saveGraphicsState (@!context :content-stream)))
+  (.setStrokingColor (@!context :content-stream) (ink color))
+  (if (empty? elements)
+    (engrave! {:s-stroke color} nil)
+    (do
+      (engrave! {:s-stroke color} elements)
+      (.restoreGraphicsState (@!context :content-stream)))))
 
-  ([{:keys [content-stream color] :as options}
+(defn stroke-color
+  ([{:keys [color] :as options}]
+   (.setStrokingColor (@!context :content-stream) (ink color))
+   (engrave! {:s-color color} nil))
+
+  ([{:keys [color] :as options}
     & elements]
-   (doto content-stream
+   (doto (@!context :content-stream)
      .saveGraphicsState
      (.setStrokingColor (ink color)))
-   (engrave! nil elements)
-   (.restoreGraphicsState (@!context :content-stream))
-   {:s-color color}))
+   (engrave! {:s-color color} elements)
+   (.restoreGraphicsState (@!context :content-stream))))
 
 (defn fill-color
   ([{:keys [content-stream color] :as options}]
    (.setNonStrokingColor (@!context :content-stream) (ink color))
-   {:f-color color})
+   (engrave! {:f-color color} nil))
 
   ([{:keys [content-stream color] :as options}
     & elements]
    (doto content-stream
      .saveGraphicsState
      (.setNonStrokingColor (ink color)))
-   (engrave! nil elements)
-   (.restoreGraphicsState (@!context :content-stream))
-   {:f-color color}))
+   (engrave! {:f-color color} elements)
+   (.restoreGraphicsState (@!context :content-stream))))
 
-(deftag rectangle [content-stream x y width height
+(deftag rectangle [x y width height
                    :or {x 100
                         y 100
                         width 100
                         height 100}]
-  (doto (@!context :content-stream)
-    (fn [x] (.addRect x (map #(-> % toMeasurement toPoints :value) [x y width height])))
-    #_(apply .addRect (map #(-> % toMeasurement toPoints :value) [x y width height]))
-    .stroke)
-  nil)
+  (let [[x y width height](map #(-> % toMeasurement toPoints :value float) [x y width height])]
+    (.addRect (@!context :content-stream) x y width height)
+    (.stroke (@!context :content-stream))))
 
 #_(defn rectangle
     [{:keys [content-stream x y width height] :as options}

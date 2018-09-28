@@ -1,262 +1,208 @@
-;;;_ Namespace
 (ns roland.typesetter
-  (:require [clojure.string :refer [split]]))
+  (:import [org.apache.pdfbox.pdmodel.font PDFont])
+  (:require [clojure.string :refer [split]]
+            [clojure.pprint :as pp]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* true)
 
-;; * Functions
-;; ** Global
-;; width_tl 0
-;; cost_tl 1
-;; length_tl 2
-;; [par width len]
+(defrecord Box [^java.lang.String content
+                ^clojure.lang.Numbers length
+                ^clojure.lang.Numbers height])
 
-(defprotocol TypeToken
-  (tokenize [w]))
+(defrecord Path [breakups
+                 ^clojure.lang.Numbers current-nlw
+                 ^clojure.lang.Numbers prev-acceptability
+                 ^clojure.lang.Numbers current-acceptability])
 
-(defrecord Box [^java.lang.String content ^java.lang.Integer length]
-  TypeToken
-  (tokenize [b] b))
+(defn boxify [text]
+  (map #(->Box % (count %) 1) (split text #"\s+")))
 
-(defrecord Glue [^java.lang.Long width ^java.lang.Long stretch ^java.lang.Long shrink]
-  TypeToken
-  (tokenize [g] g))
+(defn text->Boxes [^java.lang.String text
+                   ^org.apache.pdfbox.pdmodel.font.PDFont font
+                   size]
+  (map #(->Box %
+               (* size (/ (.getStringWidth font %) 1000)) 1)
+       (split text #"\s+")))
 
-(defrecord Penalty [^java.lang.Long width ^java.lang.Long cost]
-  TypeToken
-  (tokenize [p] p))
+;; * Viterbi
+(defn line-acceptability [o- o+]
+  (fn [x] (let [o (double (if (> 0 x) o- o+))]
+            (- (- (double(Math/log (double (* 2 (* Math/PI o))))))
+               (/ (double (Math/pow x 2)) (double (Math/pow o 2)))))))
 
-(extend-protocol TypeToken
-  java.lang.String
-  (tokenize [s]
-    (map #(Box. %1 (count %1)) (split s #"\s+"))))
+;; TODO Find where to put font settings -> Probably a style map with paragraph and font settings
+;; TODO Switch wordspacing calculation directly in typesetter.
 
-;;;_ * Linebreaking 1 (Tex like)
+(defn viterbi [tw o- o+]
+  (fn [^clojure.lang.PersistentVector$2 boxes font]
+    (let [line-acc (line-acceptability o- o+)
+         space (* 12 (/ (.getWidthFromFont font 32) 1000))
+
+         explore-path (fn [i ^roland.typesetter.Box box ^roland.typesetter.Path path]
+                        (let [cwi (:length box)
+                              nlw (:current-nlw path)
+                              acc (:current-acceptability path)
+                              longerline-path (assoc path
+                                                     :breakups (assoc (:breakups path) (- (count (:breakups path)) 1) i)
+                                                     :current-nlw (+ space cwi nlw)
+                                                     :current-acceptability (+ (:prev-acceptability path)
+                                                                               (line-acc (- (+ space cwi nlw) tw))))
+                              newline-path (assoc path
+                                                  :breakups (conj (:breakups path) i)
+                                                  :current-nlw cwi
+                                                  :current-acceptability (+ acc
+                                                                            (line-acc (- cwi tw)))
+                                                  :prev-acceptability acc)]
+                          [longerline-path newline-path]))
+
+         explore-paths (fn [i ^roland.typesetter.Box box ^clojure.lang.PersistentVector paths]
+                         (let [explored (map #(explore-path i box %) paths)
+                               lg-lines (apply max-key :current-acceptability (reduce #(conj %1 (first %2)) [] explored))
+                               nl-lines (apply max-key :current-acceptability (reduce #(conj %1 (second %2)) [] explored))]
+                           [lg-lines nl-lines]))]
+     (loop [i 1
+            boxes boxes
+            paths [(->Path [0 0] 0 1 1)]]
+       (if (.hasNext boxes)
+         (recur (inc i) boxes (explore-paths i (.next boxes) paths))
+         (:breakups (apply max-key :current-acceptability paths)))))))
+
+;; * Tex like
 
 (defrecord Par1 [^clojure.lang.PersistentList ls ^java.lang.Long width ^java.lang.Long cost])
 
-#_(defn lb1 [words maxw optw]
+
+;; TODO Convert to iterator
+(defn lb1 [maxw optw]
+  (fn [words font]
     (letfn [
-            (pstart [word]
-              ;;{[l & ls] width cost}
-              (list (Par1.  (list (list word)) (:length word) 0)))
+           (pstart [word]
+             ;;{[l & ls] width cost}
+             (list (Par1.  (list (list word)) (:length word) 0)))
 
-            (pstepr [ps w]
-              (filter pfit (conj (map #(pglue w %1) ps)
-                                 (pnew w (apply (partial min-key :cost) ps)))))
+           (pstepr [ps w]
+             (filter pfit (conj (map #(pglue w %1) ps)
+                                (pnew w (apply (partial min-key :cost) ps)))))
 
-            (pnew [w p]
-              (let [ls (:ls p)
-                    cost (:cost p)]
-                
-                (if (and (= 1 (count ls)) (= 0 cost))
-                  (Par1. (conj ls (list w)) (:length w) 0)
-                  (Par1. (conj ls (list w)) (:length w) (pcost p)))))
+           (pnew [w p]
+             (let [ls (:ls p)
+                   cost (:cost p)]
+               (if (and (= 1 (count ls)) (= 0 cost))
+                 (Par1. (conj ls (list w)) (:length w) 0)
+                 (Par1. (conj ls (list w)) (:length w) (pcost p)))))
 
-            (pglue [w p]
-              (let [[l & ls] (:ls p)]
-                (Par1. (conj ls (conj l w)) (+ (:width p) 1 (count w)) (:cost p))))
+           (pglue [w p]
+             (let [[l & ls] (:ls p)]
+               (Par1. (conj ls (conj l w)) (+ (:width p) (* 12 (/ (.getWidthFromFont font 32) 1000)) (:length w)) (:cost p))))
 
-            (pcost [p]
-              (+ (plinc p) (:cost p)))
+           (pcost [p]
+             (+ (plinc p) (:cost p)))
 
-            (plinc [p]
-              (Math/pow (- optw (:width p)) 2))
+           (plinc [p]
+             (Math/pow (- optw (:width p)) 2))
 
-            (pfit [p]
-              (<= (:width p) maxw))
-            (let [[w & ws :as wws] (reverse words)]
-              (apply (partial min-key :cost) (reduce pstepr (pstart w) ws)))]))
+           (pfit [p]
+             (<= (:width p) maxw))]
 
-;;;_ * Linebreaking 3 (Functional linear)
-(defrecord Par3 [^clojure.lang.PersistentVector ps ^java.lang.Long tw ^java.lang.Integer tl])
-
-(defn lb3
-  [ws maxw optw]
-  (letfn
-      [
-       (pstart [width]
-         ;;{[width cost length] width lenght}
-         (Par3.  [[0 0 0]] width 1))
-
-       (pstepr
-         [{:keys [ps tw tl]} w]
-         (let [
-               totw (+ w tw 1)]
-               
-           (letfn [
-                   (pnew [p]
-                     ;; if single 
-                     (if (= 0 (p 2))
-                       [tw 0 tl]
-                       [tw (+ (p 1) (Math/pow (- optw (poldwdth p)) 2)) tl]))
-
-                   (padd
-                     [p [q r & _ :as ps]]
-                     (cond
-                       (or (empty? ps) (= 1 (count ps))) (into [p] ps)
-                       (<= (pbf p q) (pbf q r)) (padd p (next ps))
-                       :else (into [p] ps)))
-
-                   (dropnofit [ps]
-                     (cond
-                       (empty? ps) ps
-                       (> (pwdth (last ps)) maxw) (dropnofit (butlast ps))
-                       :else ps))
-
-                   (ptrim [ps]
-                     (cond
-                       (or (empty? ps) (= 1 (count ps))) ps
-                       (<= (pcost (last (butlast ps))) (pcost (last ps))) (ptrim (butlast ps))
-                       :else ps))
-
-                   (pbf
-                     [p q]
-                     (let
-                         [wph (pwdth p)
-                          wqh (pwdth q)
-                          rqh (+ (- maxw wqh) 1)]
-                       (cond
-                         (and (= 0 (q 2)) (= 0 (p 1))) (min rqh (- optw wph))
-                         (= 0 (q 2)) rqh
-                         :else (min (Math/ceil (/ (- (pcost p) (pcost q)) (* (- wqh wph) 2)))
-                                    rqh))))
-
-                   (pcost [p]
-                     (if (= 0 (p 2))
-                       0
-                       (+ (p 1) (Math/pow (- optw (pwdth p)) 2))))
-
-                   (pwdth [p]
-                     (if (= 0 (p 2))
-                       totw
-                       (- totw (p 0) 1)))
-
-                   (poldwdth [p]
-                     (if (= 0 (p 2))
-                       tw
-                       (- tw (p 0) 1)))]
-
-                   
-             (Par3. (ptrim (dropnofit (padd (pnew (last ps)) ps))) totw (+ tl 1)))))
-
-       (ptile
-         [ws mm n]
-         (loop [
-                ws ws
-                [m & ms :as mms] mm
-                n n
-                output []]
-                
-           (if (or (nil? m) (< n 0))
-             output
-             (let [
-                   l (- n m)
-                   [ws1 ws2] (split-at l ws)]
-                   
-               (recur ws2 (drop l mms) (- n l) (conj output ws1))))))]
-       
-    (let [[w & sw :as wsw] (rseq (vec (tokenize ws))) 
-          zs (reductions pstepr (pstart (:width w)) (map :width sw))] 
-      (map #(map :content %1) (ptile wsw (reverse (map #(-> %1 :ps last last) zs)) (:tl (last zs)))))))
+     (let [[w & ws :as wws] (reverse words)]
+       (reduce #(conj % (+ (last %) (count %2))) [0] (:ls (apply (partial min-key :cost) (reduce pstepr (pstart w) ws))))))))
 
 
-;;;_ * Probabilistic linebreaking
+(defn break-paragraph [text font size typesetter]
+  (let [bxs (text->Boxes text font size)
+        boxes (clojure.lang.RT/iter bxs)]
+    (loop [breakups (typesetter boxes font)
+           par []]
+      (if (>= 1 (count breakups))
+          par
+          (recur (next breakups)
+                 (conj par (subvec (vec bxs) (first breakups) (second breakups))))))))
 
-(defrecord BoxP [^java.lang.String content
-                 ^java.lang.Integer lenght])
 
-(defrecord LineP [^clojure.lang.PersistentVector boxes 
-                  ^java.lang.Integer nlw
-                  ^clojure.lang.Numbers acceptability])
+;; * Archives
+#_(defn explore-path [i box path tw o- o+]
+  (let [cwi (:lenght box)
+        nlw (:current-nlw path)
+        acc (:current-acceptability path)
+        longerline-path (assoc path
+                               :breakups (assoc (:breakups path) (- (count (:breakups path)) 1) i)
+                               :current-nlw (+ 1 cwi nlw)
+                               :current-acceptability (+ (:prev-acceptability path)
+                                                         (line-acceptability (+ 1 cwi nlw) tw o- o+)))
+        newline-path (assoc path
+                            :breakups (conj (:breakups path) i)
+                            :current-nlw cwi
+                            :current-acceptability (+ acc
+                                                      (line-acceptability cwi tw o- o+))
+                            :prev-acceptability acc)]
+    [longerline-path newline-path]))
 
-(defrecord ParagraphP [^clojure.lang.PersistentVector lines
-                       ^roland.typesetter.LineP current-line
-                       ^clojure.lang.Numbers current-nlw
-                       ^clojure.lang.Numbers acceptability])
+#_(defn explore-paths [i box paths tw o- o+]
+  (let [explored (map #(explore-path i box % tw o- o+) paths)
+        lg-lines (apply max-key :current-acceptability (reduce #(conj %1 (first %2)) [] explored))
+        nl-lines (apply max-key :current-acceptability (reduce #(conj %1 (second %2)) [] explored))]
+    [lg-lines nl-lines]))
 
-;;;_   * Test
 
-(defn normal [x o]
+
+#_(defn normal [x o]
   (/ (Math/exp (/ (Math/pow x 2) (Math/pow o 2)))
-     (* 2 Math/PI o)))
+      (* 2 Math/PI o)))
 
+#_(defn normal2 [x o]
+  (/ (Math/exp (- (/ (Math/pow x 2) (* 2 (Math/pow o 2)))))
+     (* o (Math/sqrt (* 2 Math/PI)))))
 
-(defn boxify [text]
-  (map #(->BoxP % (count %)) (split text #"\s+")))
+#_(defn acc-distribution
+  ([cwi x o- o+] (if (>= (+ cwi x) 0)
+                   (-
+                    (/ (normal (+ cwi x) o+)
+                       (acc-distribution x o- o+)))
+                   (- 1
+                    (/ (normal (+ cwi x) o-)
+                       (acc-distribution x o- o+)))))
+  ([x o- o+] (if (>= x 0)
+               (normal x o+)
+               (normal x o-))))
 
-;;;_   * Natural line width
+#_(defn nonbreak-acceptability [cwi x tw o- o+]
+  (if (< tw (+ cwi x))
+    (acc-distribution cwi x o- o+)
+    1))
 
-#_(defn nlwi [cwi nlwi-1 in]
-  (if nlwi-1 
-    (if (nlwi-1 :breakup)
-      cwi
-      (+ (nlwi-1 :width) cwi))
-    in))
+#_(defn explore-paths [i [b-path n-path] box tw o- o+]
+  (let [bb (assoc b-path
+                  :breakups (conj (:breakups b-path) i)
+                  :current-acceptability (* (:current-acceptability b-path)
+                                             (acc-distribution (:lenght box) (- tw) o- o+))
+                  :current-nlw 0
+                  :just-broke? true)
+        bn (assoc b-path
+                  :current-acceptability (* (:current-acceptability b-path)
+                                            (unbreak-acceptability box b-path tw o- o+))
+                  :current-nlw (+ (:current-nlw b-path) (:lenght box))
+                  :just-broke? false)
+        nb (assoc n-path
+                  :breakups (conj (:breakups n-path) i)
+                  :current-acceptability (* (:current-acceptability n-path)
+                                          (acc-distribution (:lenght box) (- (:current-nlw n-path) tw) o- o+))
+                  :current-nlw 0
+                  :just-broke? true)
+        nn (assoc n-path
+                  :current-acceptability (* (:current-acceptability n-path)
+                                            (unbreak-acceptability box n-path tw o- o+))
+                  :current-nlw (+ (:current-nlw n-path) 1 (:lenght box))
+                  :just-broke? false)]
+    (println (:content box) "\n" bb "\n" bn "\n" nb "\n" nn "\n")
+    [(max-key :current-acceptability bb nb) (max-key :current-acceptability bn nn)]))
 
-;;;_   * Acceptability probability
-
-(defn br-acceptability-distribution
-  ([cwi x o+ o-] (if (>= (+ cwi x) 0)
-                   (do (println "+")(/ (normal (+ cwi x) o+)
-                       (br-acceptability-distribution x o+ o-)))
-                   (do (println "-") (/ (normal (+ cwi x) o-)
-                          (br-acceptability-distribution x o+ o-)))))
-  ([x o+ o-] (if (>= x 0)
-               (do (println "2+") (normal x o+))
-               (do (println "2-") (normal x o-)))))
-
-(defn breakup-acceptability [box par tw o+ o-]
-  ;;only if a breakpoint candidat
-  (let [nlwi-1 (:nlw (:current-line par))
-        cwi (if (= nlwi-1 0)
-              (:lenght box)
-              (+ 1 (:lenght box)))
-        prev-a (:acceptability par)]
-    (br-acceptability-distribution cwi (- nlwi-1 tw) o+ o-)))
-
-(defn new-line! [par box acc]
-  (let [nline (->LineP [box] (:lenght box) acc)
-        nlines (conj (:lines par) (:current-line par))
-        new-par (assoc par
-                        :lines nlines
-                        :current-line nline)]
-    new-par))
-
-(defn add-box! [par box acc]
-  (let [updated-boxes (conj (:boxes (:current-line par)) box)
-        updated-nlw (+ (if (= (:nlw (:current-line par)) 0) 0 1) (:lenght box) (:nlw (:current-line par)))
-        updated-line (assoc (:current-line par) 
-                             :boxes updated-boxes
-                             :acceptability acc
-                             :nlw updated-nlw)
-        new-par (assoc par :current-line updated-line)]
-    new-par))
-
-(defn prob-linebreak-step [par box tw o+ o-]
-  (let [acc (breakup-acceptability box par tw o+ o-)]
-    (println (:content box) (:nlw (:current-line par))  acc)
-    (if (<= acc (:acceptability (:current-line par)))
-      (add-box! par box acc)
-      (new-line! par box acc))))
-
-(defn prob-linebreak [text text-width o+ o-]
-  (let [line (->LineP [] 0 1)
-        paragraph (->ParagraphP [] line 0 1)
-        breakup-step #(prob-linebreak-step %1 %2 text-width o+ o-)]
-    (reduce breakup-step paragraph (boxify text))))
-
-
-;;;_  * Functions
-
-;;;_   * To maximize
-
-(defn c1 [o+ o-]
-(/ (Math/pow o+ 2) (Math/pow o- 2)))
-
-(defn c2 [o+ o-]
-(* (Math/pow o+ 2) (Math/log (/ o+ o-))))
-
-(defn c3 [o+]
-(* (Math/pow o+ 2) (Math/log (* 2 Math/PI o+))))
-
- 
+#_(defn viterbi [text tw o- o+]
+  (let [bxs (boxify text)]
+    (loop [i 2
+           boxes (next bxs)
+           paths [(->Path [0 1] 0 (acc-distribution (:lenght (first bxs)) (- tw) o- o+) true)
+                  (->Path [0  ] (:lenght (first bxs)) 1 true)]]
+     (if (empty? boxes)
+       paths
+       (recur (inc i) (next boxes) (explore-paths i paths (first boxes) tw o- o+))))))
