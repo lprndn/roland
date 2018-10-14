@@ -1,50 +1,13 @@
-# roland
+# Roland
 
-FIXME: description
+*Roland* is currently in prototype state. Most code will eventually change and
+is currently almost unusable.  
 
-## Installation
+*Roland* aims to be an alternative to InDesign and Tex alike.  
+The main goal is to provide a convenient way for authors and designers to work
+together on a document. Authors should find a convenient tool for writing while
+designers should be able to shape PDF documents whith professionnal grade
+quality.  
 
-Download from http://example.com/FIXME.
-
-## Usage
-
-FIXME: explanation
-
-Run the project directly:
-
-    $ boot run
-
-Run the project's tests (they'll fail until you edit them):
-
-    $ boot test
-
-Build an uberjar from the project:
-
-    $ boot build
-
-Run the uberjar:
-
-    $ java -jar target/roland-0.1.0-SNAPSHOT-standalone.jar [args]
-
-## Options
-
-FIXME: listing of options this app accepts.
-
-## Examples
-
-...
-
-### Bugs
-
-...
-
-### Any Other Sections
-### That You Think
-### Might be Useful
-
-## License
-
-Copyright © 2017 FIXME
-
-Distributed under the Eclipse Public License either version 1.0 or (at
-your option) any later version.
+Nevertheless, *Roland* wish to keep in mind that if tools shape products, it
+should allow users to extend it but also to experiment in its own construction. 
